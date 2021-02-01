@@ -1,5 +1,16 @@
-import { Source } from ".";
-import { Manga, Chapter, ChapterDetails, SearchRequest, PagedResults, MangaTile, LanguageCode, Tag, MangaStatus, HomeSection } from "../models";
+import {Source} from ".";
+import {
+    Chapter,
+    ChapterDetails,
+    HomeSection,
+    LanguageCode,
+    Manga,
+    MangaStatus,
+    MangaTile,
+    PagedResults,
+    SearchRequest,
+    Tag
+} from "../models";
 
 export abstract class Madara extends Source {
 
@@ -44,15 +55,22 @@ export abstract class Madara extends Source {
      * selector to extract URLs from popular manga. This is available to be overridden.
      */
     popularMangaUrlSelector: string = "div.post-title a"
-
+    /**
+     * Different Madara sources might have a slightly different selector which is required to parse out
+     * each manga object while on a search result page. This is the selector
+     * which is looped over. This may be overridden if required.
+     */
+    searchMangaSelector: string = "div.c-tabs-item__content"
+    /**
+     * Set to false if your source has individual buttons for each page as opposed to a 'LOAD MORE' button
+     */
+    loadMoreSearchManga: boolean = true
 
     parseDate(dateString: string): Date {
         // Primarily we see dates for the format: "1 day ago" or "16 Apr 2020"
         let dateStringModified = dateString.replace('day', 'days').replace('month', 'months').replace('hour', 'hours')
         return new Date(this.convertTime(dateStringModified))
     }
-
-
 
     async getMangaDetails(mangaId: string): Promise<Manga> {
         const request = createRequestObject({
@@ -73,13 +91,13 @@ export abstract class Madara extends Source {
         let isOngoing = $('div.summary-content').text().toLowerCase().trim() == "ongoing"
         let genres: Tag[] = []
 
-        for(let obj of $('div.genres-content a').toArray()) {
+        for (let obj of $('div.genres-content a').toArray()) {
             let genre = $(obj).text()
             genres.push(createTag({label: genre, id: genre}))
         }
 
         // If we cannot parse out the data-id for this title, we cannot complete subsequent requests
-        if(!numericId) {
+        if (!numericId) {
             throw(`Could not parse out the data-id for ${mangaId} - This method might need overridden in the implementing source`)
         }
 
@@ -100,7 +118,7 @@ export abstract class Madara extends Source {
             url: `${this.baseUrl}/wp-admin/admin-ajax.php`,
             method: 'POST',
             headers: {
-                "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+                "content-type": "application/x-www-form-urlencoded",
                 "referer": this.baseUrl
             },
             data: `action=manga_get_chapters&manga=${mangaId}`
@@ -113,17 +131,17 @@ export abstract class Madara extends Source {
         // Capture the manga title, as this differs from the ID which this function is fed
         let realTitle = $('a', $('li.wp-manga-chapter  ').first()).attr('href')?.replace(`${this.baseUrl}/${this.sourceTraversalPathName}/`, '').replace(/\/chapter.*/, '')
 
-        if(!realTitle) {
+        if (!realTitle) {
             throw(`Failed to parse the human-readable title for ${mangaId}`)
         }
 
         // For each available chapter..
-        for(let obj of $('li.wp-manga-chapter  ').toArray()) {
+        for (let obj of $('li.wp-manga-chapter  ').toArray()) {
             let id = $('a', $(obj)).first().attr('href')?.replace(`${this.baseUrl}/${this.sourceTraversalPathName}/${realTitle}/`, '').replace('/', '')
             let chapNum = Number($('a', $(obj)).first().text().replace(/\D/g, ''))
             let releaseDate = $('i', $(obj)).text()
 
-            if(!id) {
+            if (!id) {
                 throw(`Could not parse out ID when getting chapters for ${mangaId}`)
             }
 
@@ -151,10 +169,10 @@ export abstract class Madara extends Source {
 
         let pages: string[] = []
 
-        for(let obj of $('div.page-break').toArray()) {
+        for (let obj of $('div.page-break').toArray()) {
             let page = $('img', $(obj)).attr('data-src')
 
-            if(!page) {
+            if (!page) {
                 throw(`Could not parse page for ${mangaId}/${chapterId}`)
             }
 
@@ -170,32 +188,37 @@ export abstract class Madara extends Source {
 
     }
 
-    /**
-     * Different Madara sources might have a slightly different selector which is required to parse out
-     * each manga object while on a search result page. This is the selector
-     * which is looped over. This may be overridden if required.
-     */
-    searchMangaSelector: string = "div.c-tabs-item__content"
-
     async searchRequest(query: SearchRequest, metadata: any): Promise<PagedResults> {
         // If we're supplied a page that we should be on, set our internal reference to that page. Otherwise, we start from page 0.
         let page = metadata.page ?? 0
-        const request = createRequestObject({
-            url: `${this.baseUrl}/page/${page}?s=${query.title}&post_type=wp-manga`,
-            method: 'GET',
-            cookies: [createCookie({name: 'wpmanga-adault', value: "1", domain: this.baseUrl})]
-        })
-
-        let data = await this.requestManager.schedule(request, 1)
-        let $ = this.cheerio.load(data.data)
         let results: MangaTile[] = []
+        let $: CheerioStatic
 
-        for(let obj of $(this.searchMangaSelector).toArray()) {
+        const request = createRequestObject({
+            url: `${this.baseUrl}/wp-admin/admin-ajax.php`,
+            method: 'POST',
+            headers: {
+                "content-type": "application/x-www-form-urlencoded",
+                "referer": this.baseUrl
+            },
+            data: {
+                "action": "madara_load_more",
+                "page": `${page}`,
+                "template": "madara-core/content/content-search",
+                "vars[s]": `${query.title}`,
+                "vars[paged]": "1",
+                "vars[posts_per_page]": "20"
+            }
+        })
+        let data = await this.requestManager.schedule(request, 1)
+        $ = this.cheerio.load(data.data)
+
+        for (let obj of $(this.searchMangaSelector).toArray()) {
             let id = $('a', $(obj)).attr('href')?.replace(`${this.baseUrl}/${this.sourceTraversalPathName}/`, '').replace('/', '')
             let title = createIconText({text: $('a', $(obj)).attr('title') ?? ''})
             let image = $('img', $(obj)).attr('data-src')
 
-            if(!id || !title.text || !image) {
+            if (!id || !title.text || !image) {
                 // Something went wrong with our parsing, return a detailed error
                 throw(`Failed to parse searchResult for ${this.baseUrl} using ${this.searchMangaSelector} as a loop selector`)
             }
@@ -207,22 +230,10 @@ export abstract class Madara extends Source {
             }))
         }
 
-        // Check to see whether we need to navigate to the next page or not
-        if($('div.wp-pagenavi')) {
-            // There ARE multiple pages available, now we must check if we've reached the last or not
-            let pageContext = $('span.pages').text().match(/(\d)/g)
-            
-            if(!pageContext || !pageContext[0] || !pageContext[1]) {
-                throw(`Failed to parse whether this search has more pages or not. This source may need to have it's searchRequest method overridden`)
-            }
-
-            // Because we used the \d regex, we can safely cast each capture to a numeric value
-            if(Number(pageContext[1]) != Number(pageContext[2])) {
-                metadata.page = page + 1
-            }
-            else {
-                metadata.page = undefined
-            }
+        if (results.length > 20) {
+            metadata.page = undefined
+        } else {
+            metadata.page = page + 1
         }
 
         return createPagedResults({
@@ -233,11 +244,11 @@ export abstract class Madara extends Source {
 
     /**
      * It's hard to capture a default logic for homepages. So for madara sources,
-     * instead we've provided a homesection reader for the base_url/webtoons/ endpoint.
+     * instead we've provided a homesection reader for the base_url/source_traversal_path/ endpoint.
      * This supports having paged views in almost all cases.
-     * @param sectionCallback 
+     * @param sectionCallback
      */
-    async getHomePageSections(sectionCallback: (section: HomeSection) => void): Promise<void> { 
+    async getHomePageSections(sectionCallback: (section: HomeSection) => void): Promise<void> {
         let section: HomeSection = createHomeSection({id: "latest", title: "Latest Titles"})
         sectionCallback(section)
 
@@ -252,25 +263,25 @@ export abstract class Madara extends Source {
         let $ = this.cheerio.load(data.data)
         let items: MangaTile[] = []
 
-        for(let obj of $('div.manga').toArray()) {
+        for (let obj of $('div.manga').toArray()) {
             let image = $('img', $(obj)).attr('data-src')
             let title = $('a', $('h3.h5', $(obj))).text()
             let id = $('a', $('h3.h5', $(obj))).attr('href')?.replace(`${this.baseUrl}/${this.sourceTraversalPathName}/`, '').replace('/', '')
 
-            if(!id || !title || !image) {
-                throw(`Failed to parse homepage sections for ${this.baseUrl}/${this.sourceTraversalPathName}/`)
+            if (!id || !title || !image) {
+                throw(`Failed to parse homepage sections for ${this.baseUrl}/${this.homePage}/`)
             }
 
             items.push(createMangaTile({
                 id: id,
                 title: createIconText({text: title}),
                 image: image
-            }))            
+            }))
         }
 
         section.items = items
         sectionCallback(section)
-     }
+    }
 
     async getViewMoreItems(homepageSectionId: string, metadata: any): Promise<PagedResults | null> {
         // We only have one homepage section ID, so we don't need to worry about handling that any
@@ -286,12 +297,12 @@ export abstract class Madara extends Source {
         let $ = this.cheerio.load(data.data)
         let items: MangaTile[] = []
 
-        for(let obj of $('div.manga').toArray()) {
+        for (let obj of $('div.manga').toArray()) {
             let image = $('img', $(obj)).attr('data-src')
             let title = $('a', $('h3.h5', $(obj))).text()
             let id = $('a', $('h3.h5', $(obj))).attr('href')?.replace(`${this.baseUrl}/${this.sourceTraversalPathName}/`, '').replace('/', '')
 
-            if(!id || !title || !image) {
+            if (!id || !title || !image) {
                 throw(`Failed to parse homepage sections for ${this.baseUrl}/${this.sourceTraversalPathName}`)
             }
 
@@ -299,12 +310,12 @@ export abstract class Madara extends Source {
                 id: id,
                 title: createIconText({text: title}),
                 image: image
-            }))            
+            }))
         }
 
         // Set up to go to the next page. If we are on the last page, remove the logic.
         metadata.page = page + 1
-        if(!$('a.last')) {
+        if (!$('a.last')) {
             metadata = undefined
         }
 
@@ -312,5 +323,31 @@ export abstract class Madara extends Source {
             results: items,
             metadata: metadata
         })
-     }
+    }
+
+    // Only used in the test wrapper
+    async getNumericId(mangaId: string): Promise<string> {
+        const request = createRequestObject({
+            url: `${this.baseUrl}/${this.sourceTraversalPathName}/${mangaId}`,
+            method: 'GET'
+        })
+
+        let data = await this.requestManager.schedule(request, 1)
+        let $ = this.cheerio.load(data.data)
+        let numericId = $('link[rel="shortlink"]').attr('href')?.replace(`${this.baseUrl}/?p=`, '')
+        if (!numericId) {
+            throw(`Failed to parse the numeric ID for ${mangaId}`)
+        }
+
+        return numericId
+    }
+
+    cloudflareBypassRequest() {
+    return createRequestObject({
+      url: `${this.baseUrl}`,
+      method: 'GET',
+    })
+  }
+
+
 }
