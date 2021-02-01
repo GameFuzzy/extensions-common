@@ -204,7 +204,7 @@ export abstract class Madara extends Source {
             data: {
                 "action": "madara_load_more",
                 "page": `${page}`,
-                "template": "madara-core/content/content-search",
+                "template": encodeURIComponent("madara-core/content/content-search"),
                 "vars[s]": `${query.title}`,
                 "vars[paged]": "1",
                 "vars[posts_per_page]": "20"
