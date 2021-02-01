@@ -113,6 +113,14 @@ export abstract class Madara extends Source {
         })
     }
 
+    encodeObject(obj: {[x: string]: any}): any {
+        let ret: any = {}
+        for(const entry of Object.entries(obj)) {
+            ret[encodeURIComponent(entry[0])] = encodeURIComponent(entry[1])
+        }
+        return ret
+    }
+
     async getChapters(mangaId: string): Promise<Chapter[]> {
         const request = createRequestObject({
             url: `${this.baseUrl}/wp-admin/admin-ajax.php`,
@@ -121,7 +129,10 @@ export abstract class Madara extends Source {
                 "content-type": "application/x-www-form-urlencoded",
                 "referer": this.baseUrl
             },
-            data: `action=manga_get_chapters&manga=${mangaId}`
+            data: this.encodeObject({
+                "action": "manga_get_chapters",
+                "manga": mangaId
+            })
         })
 
         let data = await this.requestManager.schedule(request, 1)
@@ -188,6 +199,8 @@ export abstract class Madara extends Source {
 
     }
 
+
+
     async searchRequest(query: SearchRequest, metadata: any): Promise<PagedResults> {
         // If we're supplied a page that we should be on, set our internal reference to that page. Otherwise, we start from page 0.
         let page = metadata.page ?? 0
@@ -201,16 +214,17 @@ export abstract class Madara extends Source {
                 "content-type": "application/x-www-form-urlencoded",
                 "referer": this.baseUrl
             },
-            data: {
+            data: this.encodeObject({
                 "action": "madara_load_more",
-                "page": `${page}`,
+                "page": page,
                 "template": "madara-core/content/content-search",
-                "vars[s]": `${query.title}`,
+                "vars[s]": query.title,
                 "vars[paged]": "1",
                 "vars[posts_per_page]": "20"
-            }
+            })
         })
         let data = await this.requestManager.schedule(request, 1)
+        console.log("DATA FROM REQUEST:", data)
         $ = this.cheerio.load(data.data)
 
         for (let obj of $(this.searchMangaSelector).toArray()) {
